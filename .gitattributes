@@ -20,3 +20,12 @@
 *.exe binary
 *.dll binary
 *.zip binary
+
+# GitHub Linguist Overrides (Force 100% C# in repository language bar)
+*.ps1 linguist-detectable=false linguist-vendored=true
+scripts/** linguist-detectable=false linguist-vendored=true
+*.xaml linguist-detectable=false
+*.xml linguist-detectable=false
+*.json linguist-detectable=false
+*.yml linguist-detectable=false
+*.yaml linguist-detectable=false
