@@ -1,0 +1,455 @@
+<ui:FluentWindow x:Class="OmniAudioStudio.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:converters="clr-namespace:OmniAudioStudio.Desktop.Converters"
+        xmlns:viewmodels="clr-namespace:OmniAudioStudio.Desktop.ViewModels"
+        mc:Ignorable="d"
+        Title="OmniAudio Studio"
+        Icon="Assets/icon.ico"
+        Height="840" Width="1180"
+        MinHeight="680" MinWidth="960"
+        WindowStartupLocation="CenterScreen"
+        WindowBackdropType="Mica"
+        ExtendsContentIntoTitleBar="True"
+        AllowDrop="True"
+        Drop="OnWindowDrop"
+        DragOver="OnWindowDragOver"
+        FontFamily="Segoe UI Variable Text, Segoe UI, -apple-system, sans-serif"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
+        RenderOptions.ClearTypeHint="Enabled"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+
+    <Window.Resources>
+        <converters:TaskStatusToBrushConverter x:Key="StatusBrushConverter" />
+        <converters:TaskStatusToBackgroundBrushConverter x:Key="StatusBgConverter" />
+        <converters:TaskStatusToBorderBrushConverter x:Key="StatusBorderConverter" />
+        <converters:TaskStatusToSymbolConverter x:Key="StatusSymbolConverter" />
+        <converters:InverseBooleanConverter x:Key="InverseBoolConverter" />
+        <converters:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVisConverter" />
+        <converters:IntToEmptyQueueVisibilityConverter x:Key="EmptyQueueVisibilityConverter" />
+        <converters:GreaterZeroToVisibilityConverter x:Key="GreaterZeroToVisConverter" />
+        <converters:StringNotEmptyToVisibilityConverter x:Key="StringNotEmptyVisibilityConverter" />
+        <BooleanToVisibilityConverter x:Key="BoolToVisConverter" />
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Custom TitleBar with Dynamic Theme and Status Pills -->
+        <ui:TitleBar Grid.Row="0" Title="OmniAudio Studio" Icon="Assets/icon.ico">
+            <ui:TitleBar.Header>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
+                    <!-- Version Badge -->
+                    <Border CornerRadius="8" Background="#14FFFFFF" BorderBrush="#20FFFFFF" BorderThickness="1" Padding="7,2" Margin="0,0,10,0">
+                        <TextBlock Text="v1.5.0 PRO" Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="11" FontWeight="SemiBold"/>
+                    </Border>
+
+                    <!-- FFmpeg Detection Badge -->
+                    <Border CornerRadius="12" Background="{Binding FfmpegStatusBgBrush}" BorderBrush="{Binding FfmpegStatusBorderBrush}" BorderThickness="1" Padding="10,3" Margin="0,0,12,0">
+                        <TextBlock Text="{Binding FfmpegStatusText}" Foreground="{Binding FfmpegStatusBrush}" FontSize="12" FontWeight="SemiBold"/>
+                    </Border>
+
+                    <!-- Theme Switcher -->
+                    <ui:Button Appearance="Transparent" Padding="7,4" ToolTip="Toggle Dark / Light Theme" Command="{Binding ToggleThemeCommand}">
+                        <ui:SymbolIcon Symbol="DarkTheme24" FontSize="16" />
+                    </ui:Button>
+                </StackPanel>
+            </ui:TitleBar.Header>
+        </ui:TitleBar>
+
+        <!-- Main Workspace -->
+        <Grid Grid.Row="1" Margin="24,0,24,20">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />  <!-- 1. Action Toolbar -->
+                <RowDefinition Height="Auto" />  <!-- 2. Settings Panel -->
+                <RowDefinition Height="*" />     <!-- 3. File Queue Area -->
+                <RowDefinition Height="Auto" />  <!-- 4. Progress & Action Bar -->
+            </Grid.RowDefinitions>
+
+            <!-- 1. Action Toolbar -->
+            <Grid Grid.Row="0" Margin="0,6,0,14">
+                <StackPanel Orientation="Horizontal">
+                    <ui:Button Appearance="Primary" Command="{Binding AddFilesCommand}" Padding="18,9" Margin="0,0,10,0">
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="DocumentAdd24" Margin="0,0,8,0" />
+                            <TextBlock Text="Add Audio Files" FontWeight="SemiBold" FontSize="13" />
+                        </StackPanel>
+                    </ui:Button>
+
+                    <ui:Button Appearance="Secondary" Command="{Binding AddFolderCommand}" Padding="16,9" Margin="0,0,10,0">
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="FolderAdd24" Margin="0,0,8,0" />
+                            <TextBlock Text="Add Folder" FontSize="13" />
+                        </StackPanel>
+                    </ui:Button>
+
+                    <ui:Button Appearance="Transparent" Command="{Binding ClearQueueCommand}"
+                               IsEnabled="{Binding IsConverting, Converter={StaticResource InverseBoolConverter}}"
+                               Padding="14,9">
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="Delete24" Margin="0,0,6,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                            <TextBlock Text="Clear Queue" Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13" />
+                        </StackPanel>
+                    </ui:Button>
+
+                    <!-- Smart Detected Format Capsule -->
+                    <Border CornerRadius="8" Background="#180078D4" BorderBrush="#380078D4" BorderThickness="1" 
+                            Padding="12,5" Margin="14,0,0,0" VerticalAlignment="Center"
+                            Visibility="{Binding DetectedSourceBadge, Converter={StaticResource StringNotEmptyVisibilityConverter}}">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="Source: " Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="12"/>
+                            <TextBlock Text="{Binding DetectedSourceBadge}" Foreground="#38BDF8" FontWeight="SemiBold" FontSize="12"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- Queue Item Counter -->
+                <Border HorizontalAlignment="Right" VerticalAlignment="Center" CornerRadius="12"
+                        Background="#12FFFFFF" BorderBrush="#1CFFFFFF" BorderThickness="1" Padding="12,5">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <ui:SymbolIcon Symbol="MusicNote224" FontSize="13" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,6,0"/>
+                        <TextBlock Text="{Binding TasksCount, Mode=OneWay}" FontWeight="Bold" FontSize="12" Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,4,0"/>
+                        <TextBlock Text="in queue" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- 2. Settings Panel (Linear-style 2-zone card) -->
+            <Border Grid.Row="1" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1"
+                    CornerRadius="12" Padding="20,16" Margin="0,0,0,14">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="14" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Conversion Parameters Row -->
+                    <Grid Grid.Row="0">
+                        <Grid.ColumnDefinitions>
+                            <!-- 1. Target Format -->
+                            <ColumnDefinition Width="150" />
+                            <ColumnDefinition Width="16" />
+                            <!-- 2. Bitrate Quality -->
+                            <ColumnDefinition Width="220" />
+                            <ColumnDefinition Width="20" />
+                            <!-- Vertical Divider -->
+                            <ColumnDefinition Width="1" />
+                            <ColumnDefinition Width="20" />
+                            <!-- 3. Sample Rate -->
+                            <ColumnDefinition Width="160" />
+                            <ColumnDefinition Width="16" />
+                            <!-- 4. Channels -->
+                            <ColumnDefinition Width="140" />
+                            <ColumnDefinition Width="16" />
+                            <!-- 5. CPU Threads -->
+                            <ColumnDefinition Width="*" MinWidth="160" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Target Format -->
+                        <StackPanel Grid.Column="0">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <ui:SymbolIcon Symbol="MusicNote224" FontSize="13" Foreground="#38BDF8" Margin="0,0,6,0"/>
+                                <TextBlock Text="Target Format" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                            </StackPanel>
+                            <ComboBox ItemsSource="{Binding TargetFormats}" SelectedItem="{Binding SelectedTargetFormat}"
+                                      IsEnabled="{Binding IsConverting, Converter={StaticResource InverseBoolConverter}}" />
+                        </StackPanel>
+
+                        <!-- Bitrate Quality -->
+                        <StackPanel Grid.Column="2">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <ui:SymbolIcon Symbol="TopSpeed24" FontSize="13" Foreground="#34D399" Margin="0,0,6,0"/>
+                                <TextBlock Text="Quality / Bitrate" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                            </StackPanel>
+                            <ComboBox ItemsSource="{Binding Bitrates}" SelectedItem="{Binding SelectedBitrate}"
+                                      IsEnabled="{Binding IsBitrateEnabled}" />
+                        </StackPanel>
+
+                        <!-- Subtle Vertical Separator -->
+                        <Border Grid.Column="4" Background="{DynamicResource ControlStrokeColorDefaultBrush}" VerticalAlignment="Stretch" Margin="0,4,0,2"/>
+
+                        <!-- Sample Rate -->
+                        <StackPanel Grid.Column="6">
+                            <TextBlock Text="Sample Rate" FontSize="12" FontWeight="Medium" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,6"/>
+                            <ComboBox ItemsSource="{Binding SampleRates}" SelectedItem="{Binding SelectedSampleRate}"
+                                      IsEnabled="{Binding IsConverting, Converter={StaticResource InverseBoolConverter}}" />
+                        </StackPanel>
+
+                        <!-- Channels -->
+                        <StackPanel Grid.Column="8">
+                            <TextBlock Text="Channels" FontSize="12" FontWeight="Medium" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,6"/>
+                            <ComboBox ItemsSource="{Binding Channels}" SelectedItem="{Binding SelectedChannels}"
+                                      IsEnabled="{Binding IsConverting, Converter={StaticResource InverseBoolConverter}}" />
+                        </StackPanel>
+
+                        <!-- Parallel Speed -->
+                        <StackPanel Grid.Column="10">
+                            <TextBlock Text="Parallel Speed" FontSize="12" FontWeight="Medium" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,6"/>
+                            <ComboBox ItemsSource="{Binding ConcurrencyOptions}" SelectedItem="{Binding SelectedConcurrency}"
+                                      IsEnabled="{Binding IsConverting, Converter={StaticResource InverseBoolConverter}}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Destination Directory (Integrated Pill Bar) -->
+                    <Border Grid.Row="2" Background="{DynamicResource ControlFillColorDefaultBrush}"
+                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
+                            CornerRadius="8" Padding="12,7">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,14,0">
+                                <ui:SymbolIcon Symbol="Folder24" FontSize="16" Foreground="#38BDF8" Margin="0,0,8,0"/>
+                                <TextBlock Text="Output Path:" Foreground="{DynamicResource TextFillColorPrimaryBrush}" FontSize="12" FontWeight="SemiBold"/>
+                            </StackPanel>
+
+                            <TextBox Grid.Column="1" Text="{Binding CustomOutputDir, TargetNullValue='Same folder as input files (Safe auto-rename with _converted suffix)'}"
+                                     IsReadOnly="True" VerticalAlignment="Center" BorderThickness="0" Background="Transparent"
+                                     Padding="0" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+                            <ui:Button Grid.Column="2" Appearance="Secondary" Command="{Binding BrowseOutputDirCommand}"
+                                       IsEnabled="{Binding IsConverting, Converter={StaticResource InverseBoolConverter}}"
+                                       Margin="10,0,0,0" Padding="14,6">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="FolderOpen24" Margin="0,0,6,0" FontSize="14"/>
+                                    <TextBlock Text="Browse..." FontSize="12" FontWeight="SemiBold"/>
+                                </StackPanel>
+                            </ui:Button>
+
+                            <ui:Button Grid.Column="3" Appearance="Transparent" Content="Reset" Command="{Binding ResetOutputDirCommand}"
+                                       IsEnabled="{Binding IsConverting, Converter={StaticResource InverseBoolConverter}}"
+                                       Visibility="{Binding CustomOutputDir, Converter={StaticResource StringNotEmptyVisibilityConverter}}"
+                                       Margin="6,0,0,0" Padding="10,6" ToolTip="Reset output path to source folder" FontSize="12"/>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!-- 3. File Queue Container -->
+            <Border Grid.Row="2" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1"
+                    CornerRadius="12" Margin="0,0,0,14">
+                <Grid>
+                    <!-- Virtualized ListBox -->
+                    <ListBox ItemsSource="{Binding Tasks}"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.CanContentScroll="True"
+                             VirtualizingPanel.IsVirtualizing="True"
+                             VirtualizingPanel.VirtualizationMode="Recycling"
+                             VirtualizingPanel.ScrollUnit="Pixel"
+                             Padding="10">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="Margin" Value="0,0,0,8" />
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListBoxItem">
+                                            <ContentPresenter />
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1" CornerRadius="10" Padding="14,10">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />  <!-- Icon -->
+                                            <ColumnDefinition Width="*" />     <!-- Details -->
+                                            <ColumnDefinition Width="160" />   <!-- Active Progress -->
+                                            <ColumnDefinition Width="Auto" />  <!-- Status Pill -->
+                                            <ColumnDefinition Width="Auto" />  <!-- Action -->
+                                        </Grid.ColumnDefinitions>
+
+                                        <!-- Music Icon Squircle -->
+                                        <Border Grid.Column="0" Width="40" Height="40" CornerRadius="10"
+                                                Background="#180078D4" BorderBrush="#300078D4" BorderThickness="1"
+                                                VerticalAlignment="Center" Margin="0,0,14,0">
+                                            <ui:SymbolIcon Symbol="MusicNote224" FontSize="18" Foreground="#38BDF8"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+
+                                        <!-- Name & Metadata Tags -->
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,14,0">
+                                            <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" FontSize="13"
+                                                       TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
+                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                <!-- Source Tag -->
+                                                <Border CornerRadius="4" Background="#18FFFFFF" BorderBrush="#22FFFFFF" BorderThickness="1" Padding="6,1" Margin="0,0,6,0">
+                                                    <TextBlock Text="{Binding SourceFormat}" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                                </Border>
+
+                                                <TextBlock Text="→" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" Margin="0,0,6,0" VerticalAlignment="Center"/>
+
+                                                <!-- Target Tag with Estimated/Final Size -->
+                                                <Border CornerRadius="4" Background="#1F0078D4" BorderBrush="#400078D4" BorderThickness="1" Padding="6,2" Margin="0,0,8,0" VerticalAlignment="Center">
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding TargetFormat}" FontSize="10" FontWeight="Bold" Foreground="#38BDF8"/>
+                                                        <TextBlock Text=" · " FontSize="10" Foreground="#5538BDF8"/>
+                                                        <TextBlock Text="{Binding EstimatedOrActualTargetSize}" FontSize="10" FontWeight="SemiBold"
+                                                                   Foreground="#7DD3FC" FontFamily="Cascadia Code, Consolas, Segoe UI Variable Text"/>
+                                                    </StackPanel>
+                                                </Border>
+
+                                                <!-- Size & Duration -->
+                                                <TextBlock Text="{Binding FormattedFileSize}" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                                           Margin="0,0,8,0" VerticalAlignment="Center" FontFamily="Cascadia Code, Consolas, Segoe UI Variable Text"/>
+                                                <TextBlock Text="·" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                                <TextBlock Text="{Binding FormattedDuration}" FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                                           VerticalAlignment="Center" FontFamily="Cascadia Code, Consolas, Segoe UI Variable Text"/>
+                                            </StackPanel>
+                                        </StackPanel>
+
+                                        <!-- Progress Bar during Conversion -->
+                                        <Grid Grid.Column="2" VerticalAlignment="Center" Margin="0,0,16,0"
+                                              Visibility="{Binding IsConverting, Converter={StaticResource BoolToVisConverter}}">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Progress, StringFormat='{}{0:0.#}%'}" FontSize="10" FontWeight="SemiBold"
+                                                           Foreground="#38BDF8" HorizontalAlignment="Right" Margin="0,0,0,3" FontFamily="Cascadia Code, Consolas"/>
+                                                <ProgressBar Value="{Binding Progress, Mode=OneWay}" Maximum="100" Height="5" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <!-- Status Capsule Pill -->
+                                        <Border Grid.Column="3" CornerRadius="12" Padding="10,4" Margin="0,0,8,0" VerticalAlignment="Center"
+                                                Background="{Binding Status, Converter={StaticResource StatusBgConverter}}"
+                                                BorderBrush="{Binding Status, Converter={StaticResource StatusBorderConverter}}"
+                                                BorderThickness="1">
+                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                <ui:SymbolIcon Symbol="{Binding Status, Converter={StaticResource StatusSymbolConverter}}" FontSize="12"
+                                                               Foreground="{Binding Status, Converter={StaticResource StatusBrushConverter}}" Margin="0,0,6,0"/>
+                                                <TextBlock Text="{Binding StatusText}" Foreground="{Binding Status, Converter={StaticResource StatusBrushConverter}}"
+                                                           FontSize="11" FontWeight="SemiBold"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <!-- Delete / Dismiss Button -->
+                                        <ui:Button Grid.Column="4" Appearance="Transparent" Padding="8" VerticalAlignment="Center" CornerRadius="8"
+                                                   Command="{Binding DataContext.RemoveTaskCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                   CommandParameter="{Binding}" ToolTip="Remove track from queue">
+                                            <ui:SymbolIcon Symbol="Dismiss24" FontSize="14" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        </ui:Button>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <!-- Progressive Empty State -->
+                    <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1.5" CornerRadius="12" Margin="16"
+                            Background="#04FFFFFF" Visibility="{Binding TasksCount, Converter={StaticResource EmptyQueueVisibilityConverter}}">
+                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="32">
+                            <Border Width="72" Height="72" CornerRadius="36" Background="#150078D4" BorderBrush="#350078D4" BorderThickness="1"
+                                    HorizontalAlignment="Center" Margin="0,0,0,18">
+                                <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="32" Foreground="#0078D4" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <TextBlock Text="Drop Audio Files or Folders Here" FontSize="18" FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,6"/>
+                            <TextBlock Text="Supports FLAC, MP3, WAV, AAC, M4A, OGG, OPUS, ALAC, AIFF, WMA, APE and more"
+                                       FontSize="13" Foreground="{DynamicResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" Margin="0,0,0,20" />
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                <ui:Button Appearance="Primary" Content="Browse Audio Files" Command="{Binding AddFilesCommand}" Padding="18,9" Margin="0,0,10,0"/>
+                                <ui:Button Appearance="Secondary" Content="Browse Folder" Command="{Binding AddFolderCommand}" Padding="16,9"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!-- 4. Bottom Action & Progress Bar -->
+            <Grid Grid.Row="3">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Overall Progress Strip -->
+                <Grid Grid.Row="0" Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <ProgressBar Grid.Column="0" Value="{Binding OverallProgress}" Maximum="100" Height="6" VerticalAlignment="Center" Margin="0,0,16,0"/>
+                    <TextBlock Grid.Column="1" Text="{Binding OverallProgressText}" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                               FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" FontFamily="Cascadia Code, Consolas, Segoe UI Variable Text"/>
+                </Grid>
+
+                <!-- Action Controls & Terminal Logs Expander -->
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Activity Log Expander -->
+                    <Expander Grid.Column="0" Header="Activity Log" Margin="0,0,16,0" IsExpanded="False">
+                        <Border Background="{DynamicResource ControlFillColorDefaultBrush}" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                BorderThickness="1" CornerRadius="8" Padding="10" MaxHeight="140" Margin="0,4,0,0">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding Logs}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" FontFamily="Cascadia Code, Consolas" FontSize="11"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" Margin="0,1"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Border>
+                    </Expander>
+
+                    <!-- Buttons Group -->
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom">
+                        <!-- Open Output Folder Button -->
+                        <ui:Button Appearance="Secondary" Command="{Binding OpenOutputFolderCommand}"
+                                   Visibility="{Binding HasCompletedTasks, Converter={StaticResource BoolToVisConverter}}"
+                                   Height="40" Padding="16,0" Margin="0,0,8,0" ToolTip="Open destination folder in Explorer">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="FolderOpen24" Margin="0,0,8,0" />
+                                <TextBlock Text="Open Output Folder" FontWeight="SemiBold" FontSize="13"/>
+                            </StackPanel>
+                        </ui:Button>
+
+                        <!-- Cancel Button -->
+                        <ui:Button Appearance="Danger" Content="Cancel" Command="{Binding CancelConversionCommand}"
+                                   Visibility="{Binding IsConverting, Converter={StaticResource BoolToVisConverter}}"
+                                   Height="40" Padding="20,0" Margin="0,0,8,0" />
+
+                        <!-- Start Button -->
+                        <ui:Button Appearance="Primary" Command="{Binding StartConversionCommand}"
+                                   IsEnabled="{Binding IsConverting, Converter={StaticResource InverseBoolConverter}}"
+                                   Height="40" Padding="24,0">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="Play24" Margin="0,0,8,0" />
+                                <TextBlock Text="Start Conversion" FontWeight="Bold" FontSize="14"/>
+                            </StackPanel>
+                        </ui:Button>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Grid>
+</ui:FluentWindow>

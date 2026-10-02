@@ -1,0 +1,54 @@
+## .gitignore for OmniAudioStudio (.NET 8 WPF / C#)
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+publish/
+dist*/
+
+# Visual Studio files
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+*.userprefs
+
+# JetBrains Rider & Resharper
+.idea/
+*.DotSettings.user
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# User-specific & local binaries (large > 100MB files must not be committed to Git)
+bin/*.exe
+bin/*.dll
+bin/*.zip
+!bin/.gitkeep
+*.exe
+
+# Test artifacts and scratch directories
+test_scratch/
+TestResults/
+*.trx
+
+# Windows OS files
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
