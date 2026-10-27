@@ -14,7 +14,12 @@ public class QueueManager
 
     public bool IsConverting { get; private set; }
 
-    public int MaxDegreeOfParallelism { get; set; } = Math.Clamp(Environment.ProcessorCount / 2, 2, 8);
+    private int _maxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 2, 2, 8);
+    public int MaxDegreeOfParallelism
+    {
+        get => _maxDegreeOfParallelism;
+        set => _maxDegreeOfParallelism = Math.Clamp(value, 1, 8);
+    }
 
     public event Action<string>? LogMessage;
     public event Action<int, int, double>? OverallProgressChanged;
@@ -50,13 +55,13 @@ public class QueueManager
         var sourceFullPath = Path.GetFullPath(sourcePath);
         var isSourcePath = string.Equals(Path.GetFullPath(destPath), sourceFullPath, StringComparison.OrdinalIgnoreCase);
 
-        if (isSourcePath || File.Exists(destPath) || reservedPaths.Contains(Path.GetFullPath(destPath)))
+        if (isSourcePath || File.Exists(destPath) || Directory.Exists(destPath) || reservedPaths.Contains(Path.GetFullPath(destPath)))
         {
             destPath = Path.Combine(destDir, $"{fileNameWithoutExt}_converted{extension}");
         }
 
         var suffix = 2;
-        while (File.Exists(destPath) || reservedPaths.Contains(Path.GetFullPath(destPath)))
+        while (File.Exists(destPath) || Directory.Exists(destPath) || reservedPaths.Contains(Path.GetFullPath(destPath)))
         {
             destPath = Path.Combine(destDir, $"{fileNameWithoutExt}_converted_{suffix++}{extension}");
         }
@@ -106,7 +111,12 @@ public class QueueManager
                 {
                     try
                     {
-                        var found = Directory.EnumerateFiles(path, "*.*", SearchOption.AllDirectories)
+                        var found = Directory.EnumerateFiles(path, "*", new EnumerationOptions
+                            {
+                                RecurseSubdirectories = true,
+                                IgnoreInaccessible = true,
+                                AttributesToSkip = FileAttributes.ReparsePoint
+                            })
                             .Where(f => FormatRegistry.SupportedInputExtensions.Contains(Path.GetExtension(f)));
 
                         foreach (var f in found)
@@ -134,7 +144,7 @@ public class QueueManager
             }
         });
 
-        if (filesToProcess.Count == 0 && addedCount == 0)
+        if (filesToProcess.Count == 0 && existingTasksToReset.Count == 0)
             return 0;
 
         statusProgress?.Report($"Processing {filesToProcess.Count} files...");
@@ -148,7 +158,7 @@ public class QueueManager
             foreach (var file in filesToProcess)
             {
                 var fi = new FileInfo(file);
-                var (duration, _, _, _) = _metadataService.ProbeAudio(file);
+                var (duration, _, sourceSampleRate, sourceChannels) = _metadataService.ProbeAudio(file);
                 var ext = fi.Extension;
                 var task = new ConversionTask
                 {
@@ -156,6 +166,8 @@ public class QueueManager
                     FileName = fi.Name,
                     FileSize = fi.Exists ? fi.Length : 0,
                     Duration = duration,
+                    SourceSampleRate = sourceSampleRate,
+                    SourceChannels = sourceChannels,
                     SourceFormat = FormatRegistry.DetectSourceFormatName(ext),
                     TargetFormat = targetFormat,
                     TargetPath = string.Empty,
@@ -174,11 +186,22 @@ public class QueueManager
             var profile = FormatRegistry.GetProfile(targetFormat);
             foreach (var existingTask in existingTasksToReset.Distinct())
             {
-                ResetTask(existingTask, targetFormat, outputDir, bitrate, sampleRate, channels, profile.Extension);
+                if (Tasks.Contains(existingTask))
+                {
+                    ResetTask(existingTask, targetFormat, outputDir, bitrate, sampleRate, channels, profile.Extension);
+                }
             }
 
+            var queuedSources = new HashSet<string>(
+                Tasks.Select(existingTask => Path.GetFullPath(existingTask.SourcePath)),
+                StringComparer.OrdinalIgnoreCase);
             foreach (var task in tasksCreated)
             {
+                if (!queuedSources.Add(Path.GetFullPath(task.SourcePath)))
+                {
+                    continue;
+                }
+
                 task.TargetPath = ResolveSafeTargetPath(
                     task.SourcePath,
                     outputDir,
@@ -198,14 +221,21 @@ public class QueueManager
             ApplyQueueChanges();
         }
 
-        LogMessage?.Invoke($"Added {addedCount} files to queue.");
+        if (addedCount > 0)
+        {
+            LogMessage?.Invoke($"Added {addedCount} files to queue.");
+        }
+        else if (existingTasksToReset.Count > 0)
+        {
+            LogMessage?.Invoke($"Reset {existingTasksToReset.Distinct().Count()} files for conversion.");
+        }
         EmitProgress();
         return addedCount;
     }
 
     public void RemoveTask(ConversionTask task)
     {
-        if (IsConverting && task.Status == Models.TaskStatus.Converting)
+        if (IsConverting)
             return;
 
         Tasks.Remove(task);
@@ -251,9 +281,15 @@ public class QueueManager
         {
             foreach (var t in Tasks)
             {
-                t.Status = Models.TaskStatus.Pending;
-                t.Progress = 0.0;
-                t.ErrorMessage = null;
+                var profile = FormatRegistry.GetProfile(t.TargetFormat);
+                ResetTask(
+                    t,
+                    t.TargetFormat,
+                    Path.GetDirectoryName(t.TargetPath),
+                    t.Bitrate,
+                    t.SampleRate,
+                    t.Channels,
+                    profile.Extension);
             }
             pendingTasks = Tasks.ToList();
             EmitProgress();
@@ -266,13 +302,15 @@ public class QueueManager
         }
 
         IsConverting = true;
-        _conversionCts = new CancellationTokenSource();
-        var token = _conversionCts.Token;
+        var conversionCts = new CancellationTokenSource();
+        _conversionCts = conversionCts;
+        var token = conversionCts.Token;
 
         var engine = new ConversionEngine(_locator.FFmpegPath);
-        var semaphore = new SemaphoreSlim(MaxDegreeOfParallelism, MaxDegreeOfParallelism);
+        var maxDegreeOfParallelism = Math.Clamp(MaxDegreeOfParallelism, 1, 8);
+        var semaphore = new SemaphoreSlim(maxDegreeOfParallelism, maxDegreeOfParallelism);
 
-        LogMessage?.Invoke($"Starting batch conversion of {pendingTasks.Count} tasks ({MaxDegreeOfParallelism} concurrent workers)...");
+        LogMessage?.Invoke($"Starting batch conversion of {pendingTasks.Count} tasks ({maxDegreeOfParallelism} concurrent workers)...");
 
         int completed = Tasks.Count(t => t.Status == Models.TaskStatus.Completed);
         int total = Tasks.Count;
@@ -281,9 +319,12 @@ public class QueueManager
         {
             var runningTasks = pendingTasks.Select(async task =>
             {
-                await semaphore.WaitAsync(token);
+                var semaphoreAcquired = false;
                 try
                 {
+                    await semaphore.WaitAsync(token);
+                    semaphoreAcquired = true;
+
                     if (token.IsCancellationRequested)
                     {
                         task.Status = Models.TaskStatus.Cancelled;
@@ -303,9 +344,19 @@ public class QueueManager
                         LogMessage?.Invoke($"Failed: {task.FileName} ({task.ErrorMessage})");
                     }
                 }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    if (task.Status == Models.TaskStatus.Pending)
+                    {
+                        task.Status = Models.TaskStatus.Cancelled;
+                    }
+                }
                 finally
                 {
-                    semaphore.Release();
+                    if (semaphoreAcquired)
+                    {
+                        semaphore.Release();
+                    }
                     EmitProgress();
                 }
             });
@@ -319,6 +370,9 @@ public class QueueManager
         finally
         {
             IsConverting = false;
+            semaphore.Dispose();
+            conversionCts.Dispose();
+            _conversionCts = null;
             int successCount = Tasks.Count(t => t.Status == Models.TaskStatus.Completed);
             int failedCount = Tasks.Count(t => t.Status == Models.TaskStatus.Failed);
             LogMessage?.Invoke($"Batch finished. Completed: {successCount}, Failed: {failedCount}.");

@@ -8,7 +8,7 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>OmniAudioStudio</AssemblyName>
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
-    <Version>1.5.1</Version>
+    <Version>1.5.2</Version>
   </PropertyGroup>
 
   <ItemGroup>

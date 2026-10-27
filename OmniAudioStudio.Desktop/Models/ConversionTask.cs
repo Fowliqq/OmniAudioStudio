@@ -11,6 +11,8 @@ public partial class ConversionTask : ObservableObject
     public required string SourcePath { get; init; }
     public required string FileName { get; init; }
     public long FileSize { get; init; }
+    public int SourceSampleRate { get; init; }
+    public int SourceChannels { get; init; }
 
     private TimeSpan _duration;
     public TimeSpan Duration
@@ -118,9 +120,9 @@ public partial class ConversionTask : ObservableObject
         {
             int kbps = 320;
             var match = Regex.Match(Bitrate, @"(\d+)");
-            if (match.Success)
+            if (match.Success && int.TryParse(match.Groups[1].Value, out var parsedBitrate) && parsedBitrate > 0)
             {
-                kbps = int.Parse(match.Groups[1].Value);
+                kbps = parsedBitrate;
             }
 
             if (targetFmt == "OPUS" && kbps > 256) kbps = 256;
@@ -148,12 +150,13 @@ public partial class ConversionTask : ObservableObject
         // 2. Uncompressed Lossless (WAV, AIFF)
         if (targetFmt is "WAV" or "AIFF")
         {
-            int sampleRate = SampleRate.Contains("48000") ? 48000 : (SampleRate.Contains("96000") ? 96000 : 44100);
-            int ch = Channels.Contains("Mono", StringComparison.OrdinalIgnoreCase) ? 1 : 2;
+            int sampleRate = GetEstimatedSampleRate();
+            int ch = GetEstimatedChannels();
 
             if (totalSeconds > 0)
             {
-                long bytes = (long)(totalSeconds * sampleRate * ch * 2) + 44;
+                int headerBytes = targetFmt == "WAV" ? 44 : 54;
+                long bytes = (long)(totalSeconds * sampleRate * ch * 2) + headerBytes;
                 return $"~{FormatBytes(bytes)}";
             }
             else if (FileSize > 0)
@@ -170,8 +173,8 @@ public partial class ConversionTask : ObservableObject
                 return $"~{FormatBytes(FileSize)}";
             }
 
-            int sampleRate = SampleRate.Contains("48000") ? 48000 : (SampleRate.Contains("96000") ? 96000 : 44100);
-            int ch = Channels.Contains("Mono", StringComparison.OrdinalIgnoreCase) ? 1 : 2;
+            int sampleRate = GetEstimatedSampleRate();
+            int ch = GetEstimatedChannels();
 
             if (totalSeconds > 0)
             {
@@ -186,6 +189,32 @@ public partial class ConversionTask : ObservableObject
         }
 
         return $"~{FormatBytes(FileSize)}";
+    }
+
+    private int GetEstimatedSampleRate()
+    {
+        var match = Regex.Match(SampleRate, @"(\d+)\s*Hz", RegexOptions.IgnoreCase);
+        if (match.Success && int.TryParse(match.Groups[1].Value, out var selectedRate) && selectedRate > 0)
+        {
+            return selectedRate;
+        }
+
+        return SourceSampleRate > 0 ? SourceSampleRate : 44100;
+    }
+
+    private int GetEstimatedChannels()
+    {
+        if (Channels.Contains("Mono", StringComparison.OrdinalIgnoreCase))
+        {
+            return 1;
+        }
+
+        if (Channels.Contains("Stereo", StringComparison.OrdinalIgnoreCase))
+        {
+            return 2;
+        }
+
+        return SourceChannels > 0 ? SourceChannels : 2;
     }
 
     public string FormattedDetails

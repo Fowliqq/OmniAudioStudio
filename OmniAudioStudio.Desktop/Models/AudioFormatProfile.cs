@@ -117,7 +117,7 @@ public static class FormatRegistry
     {
         if (Profiles.TryGetValue(formatName, out var profile))
             return profile;
-        return Profiles["MP3"];
+        throw new ArgumentException($"Unsupported target format: {formatName}", nameof(formatName));
     }
 
     public static readonly HashSet<string> SupportedInputExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -131,11 +131,14 @@ public static class FormatRegistry
         return extension.ToLowerInvariant() switch
         {
             ".mp3" => "MP3",
-            ".flac" or ".ape" or ".wv" => "FLAC",
+            ".flac" => "FLAC",
+            ".ape" => "APE",
+            ".wv" => "WavPack",
             ".wav" => "WAV",
             ".m4a" or ".aac" => "AAC",
             ".ogg" => "OGG",
-            ".opus" or ".mka" => "OPUS",
+            ".opus" => "OPUS",
+            ".mka" => "Matroska",
             ".wma" => "WMA",
             ".aiff" or ".aif" => "AIFF",
             ".alac" => "ALAC",

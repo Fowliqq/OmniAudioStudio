@@ -34,59 +34,69 @@ public class ConversionEngine
             return false;
         }
 
-        var targetDir = Path.GetDirectoryName(task.TargetPath);
-        if (!string.IsNullOrEmpty(targetDir))
-        {
-            Directory.CreateDirectory(targetDir);
-        }
-
-        var profile = FormatRegistry.GetProfile(task.TargetFormat);
-        var formatArgs = profile.BuildFFmpegArgs(task.Bitrate, task.SampleRate, task.Channels);
-
-        var argsList = new List<string>
-        {
-            "-n",
-            "-i", task.SourcePath,
-            "-map_metadata", "0",
-            "-vn",
-            "-loglevel", "error"
-        };
-        argsList.AddRange(formatArgs);
-        argsList.AddRange(new[]
-        {
-            "-progress", "pipe:1",
-            "-nostats",
-            task.TargetPath
-        });
-
-        var psi = new ProcessStartInfo
-        {
-            FileName = _ffmpegPath,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8
-        };
-
-        foreach (var arg in argsList)
-        {
-            psi.ArgumentList.Add(arg);
-        }
-
-        task.Status = Models.TaskStatus.Converting;
-        task.Progress = 0.0;
-        task.ErrorMessage = null;
-
-        using var process = new Process { StartInfo = psi };
-        var stderrBuilder = new StringBuilder();
-
-        var durationMicroseconds = task.Duration.TotalMilliseconds * 1000.0;
-        var timeRegex = new Regex(@"^out_time_us=(\d+)", RegexOptions.Compiled);
-
+        string? tempOutputPath = null;
         try
         {
+            var targetPath = Path.GetFullPath(task.TargetPath);
+            var targetDir = Path.GetDirectoryName(targetPath)!;
+            Directory.CreateDirectory(targetDir);
+
+            if (File.Exists(targetPath) || Directory.Exists(targetPath))
+            {
+                task.Status = Models.TaskStatus.Failed;
+                task.ErrorMessage = $"Output file already exists and was left untouched: {Path.GetFileName(targetPath)}";
+                return false;
+            }
+
+            task.TargetPath = targetPath;
+            tempOutputPath = Path.Combine(
+                targetDir,
+                $"{Path.GetFileNameWithoutExtension(targetPath)}.{Guid.NewGuid():N}.partial{Path.GetExtension(targetPath)}");
+
+            var profile = FormatRegistry.GetProfile(task.TargetFormat);
+            var formatArgs = profile.BuildFFmpegArgs(task.Bitrate, task.SampleRate, task.Channels);
+
+            var argsList = new List<string>
+            {
+                "-n",
+                "-i", task.SourcePath,
+                "-map_metadata", "0",
+                "-vn",
+                "-loglevel", "error"
+            };
+            argsList.AddRange(formatArgs);
+            argsList.AddRange(new[]
+            {
+                "-progress", "pipe:1",
+                "-nostats",
+                tempOutputPath
+            });
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = _ffmpegPath,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
+            };
+
+            foreach (var arg in argsList)
+            {
+                psi.ArgumentList.Add(arg);
+            }
+
+            task.Status = Models.TaskStatus.Converting;
+            task.Progress = 0.0;
+            task.ErrorMessage = null;
+
+            using var process = new Process { StartInfo = psi };
+            var stderrBuilder = new StringBuilder();
+            var durationMicroseconds = task.Duration.TotalMilliseconds * 1000.0;
+            var timeRegex = new Regex(@"^out_time_us=(\d+)", RegexOptions.Compiled);
+
             process.Start();
 
             // Background task to read stderr
@@ -107,9 +117,6 @@ public class ConversionEngine
             {
                 while (!process.StandardOutput.EndOfStream)
                 {
-                    if (cancellationToken.IsCancellationRequested)
-                        break;
-
                     var line = await process.StandardOutput.ReadLineAsync();
                     if (string.IsNullOrEmpty(line))
                         continue;
@@ -146,23 +153,25 @@ public class ConversionEngine
             {
                 task.Status = Models.TaskStatus.Cancelled;
                 task.Progress = 0.0;
-                // Delete partial file
-                try { if (File.Exists(task.TargetPath)) File.Delete(task.TargetPath); } catch { }
                 return false;
             }
 
             if (process.ExitCode == 0)
             {
+                if (!File.Exists(tempOutputPath) || new FileInfo(tempOutputPath).Length == 0)
+                {
+                    task.Status = Models.TaskStatus.Failed;
+                    task.ErrorMessage = "FFmpeg exited successfully but did not produce a valid output file.";
+                    return false;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                // Move without overwrite so an output created during conversion is preserved.
+                var outputSize = new FileInfo(tempOutputPath).Length;
+                File.Move(tempOutputPath, targetPath);
                 task.Status = Models.TaskStatus.Completed;
                 task.Progress = 100.0;
-                if (File.Exists(task.TargetPath))
-                {
-                    try
-                    {
-                        task.ActualFinalFileSize = new FileInfo(task.TargetPath).Length;
-                    }
-                    catch { }
-                }
+                task.ActualFinalFileSize = outputSize;
                 return true;
             }
             else
@@ -176,6 +185,7 @@ public class ConversionEngine
         catch (OperationCanceledException)
         {
             task.Status = Models.TaskStatus.Cancelled;
+            task.Progress = 0.0;
             return false;
         }
         catch (Exception ex)
@@ -183,6 +193,20 @@ public class ConversionEngine
             task.Status = Models.TaskStatus.Failed;
             task.ErrorMessage = ex.Message;
             return false;
+        }
+        finally
+        {
+            if (!string.IsNullOrEmpty(tempOutputPath))
+            {
+                try
+                {
+                    if (File.Exists(tempOutputPath))
+                    {
+                        File.Delete(tempOutputPath);
+                    }
+                }
+                catch { }
+            }
         }
     }
 }

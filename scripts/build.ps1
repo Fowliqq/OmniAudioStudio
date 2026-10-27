@@ -32,6 +32,25 @@ if ($PublishSingleFile) {
     dotnet publish $projectPath -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o $outDir
     
     if ($LASTEXITCODE -eq 0) {
+        $codecSourceDir = Join-Path $rootDir "bin"
+        $codecOutputDir = Join-Path $outDir "bin"
+        $codecFiles = @("ffmpeg.exe", "ffprobe.exe")
+        $availableCodecFiles = @($codecFiles | Where-Object { Test-Path (Join-Path $codecSourceDir $_) })
+
+        if ($availableCodecFiles.Count -gt 0) {
+            New-Item -ItemType Directory -Path $codecOutputDir -Force | Out-Null
+            foreach ($codecFile in $availableCodecFiles) {
+                Copy-Item -LiteralPath (Join-Path $codecSourceDir $codecFile) -Destination $codecOutputDir -Force
+            }
+            Write-Host "[SUCCESS] FFmpeg tools copied to: $codecOutputDir" -ForegroundColor Green
+        }
+        else {
+            Write-Warning "FFmpeg was not found in '$codecSourceDir'. The published app will need FFmpeg available on PATH."
+        }
+
         Write-Host "[SUCCESS] Executable published to: $outDir\OmniAudioStudio.exe" -ForegroundColor Green
+    }
+    else {
+        exit $LASTEXITCODE
     }
 }

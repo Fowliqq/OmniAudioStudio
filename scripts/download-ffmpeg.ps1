@@ -28,11 +28,13 @@ if ((Test-Path $ffmpegExe) -and (Test-Path $ffprobeExe)) {
 
 Write-Host ">>> Downloading FFmpeg Essentials from Gyan.dev..." -ForegroundColor Cyan
 $downloadUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-$tempZip = Join-Path ([System.IO.Path]::GetTempPath()) "ffmpeg-essentials.zip"
-$tempExtract = Join-Path ([System.IO.Path]::GetTempPath()) "ffmpeg-extract-$(Get-Random)"
+$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("OmniAudioStudio-FFmpeg-" + [Guid]::NewGuid().ToString("N"))
+$tempZip = Join-Path $tempRoot "ffmpeg-essentials.zip"
+$tempExtract = Join-Path $tempRoot "extracted"
 
 try {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     
     Invoke-WebRequest -Uri $downloadUrl -OutFile $tempZip -UseBasicParsing
     Write-Host ">>> Extracting ffmpeg.exe and ffprobe.exe..." -ForegroundColor Cyan
@@ -55,6 +57,5 @@ try {
     Write-Host "[SUCCESS] FFmpeg successfully installed into: $resolvedDir" -ForegroundColor Green
 }
 finally {
-    if (Test-Path $tempZip) { Remove-Item $tempZip -Force -ErrorAction SilentlyContinue }
-    if (Test-Path $tempExtract) { Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $tempRoot) { Remove-Item $tempRoot -Recurse -Force -ErrorAction SilentlyContinue }
 }
