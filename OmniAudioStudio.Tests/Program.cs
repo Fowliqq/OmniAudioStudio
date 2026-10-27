@@ -5,25 +5,59 @@ using OmniAudioStudio.Desktop.Services;
 
 Console.WriteLine("ControlAppearance values: " + string.Join(", ", Enum.GetNames(typeof(Wpf.Ui.Controls.ControlAppearance))));
 
-// 1. Validator & FFmpeg Discovery
-Console.WriteLine("\n[1] Testing FFmpeg Discovery...");
+// Setup test directory
+var scratchDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "test_scratch");
+Directory.CreateDirectory(scratchDir);
+var srcWav = Path.Combine(scratchDir, "test_sample.wav");
+
+Console.WriteLine("\n[1] Testing Safe Target Path Overwrite Protection...");
+var safePath = QueueManager.ResolveSafeTargetPath(srcWav, scratchDir, ".wav");
+if (Path.GetFileName(safePath) != "test_sample_converted.wav")
+{
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.WriteLine($"[FAIL] Expected 'test_sample_converted.wav', got: {Path.GetFileName(safePath)}");
+    Console.ResetColor();
+    return 1;
+}
+Console.ForegroundColor = ConsoleColor.Green;
+Console.WriteLine($"[PASS] Self-overwrite prevented: {Path.GetFileName(safePath)}");
+Console.ResetColor();
+
+var existingTarget = Path.Combine(scratchDir, "test_sample.mp3");
+File.WriteAllText(existingTarget, "must not be overwritten");
+var existingTargetSafePath = QueueManager.ResolveSafeTargetPath(srcWav, scratchDir, ".mp3");
+var reservedTargetSafePath = QueueManager.ResolveSafeTargetPath(
+    srcWav,
+    scratchDir,
+    ".mp3",
+    new[] { existingTargetSafePath });
+if (Path.GetFileName(existingTargetSafePath) != "test_sample_converted.mp3" ||
+    Path.GetFileName(reservedTargetSafePath) != "test_sample_converted_2.mp3")
+{
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.WriteLine($"[FAIL] Target collision protection failed: {existingTargetSafePath}, {reservedTargetSafePath}");
+    Console.ResetColor();
+    return 1;
+}
+Console.ForegroundColor = ConsoleColor.Green;
+Console.WriteLine("[PASS] Existing and queued target collisions are safely renamed.");
+Console.ResetColor();
+
+// 2. Validator & FFmpeg Discovery
+Console.WriteLine("\n[2] Testing FFmpeg Discovery...");
 var locator = new FFmpegLocator();
 if (!locator.IsReady || string.IsNullOrEmpty(locator.FFmpegPath))
 {
     Console.ForegroundColor = ConsoleColor.Red;
     Console.WriteLine($"[FAIL] FFmpeg not found! Path: {locator.FFmpegPath}");
     Console.ResetColor();
+    try { Directory.Delete(scratchDir, true); } catch { }
     return 1;
 }
 Console.ForegroundColor = ConsoleColor.Green;
 Console.WriteLine($"[PASS] FFmpeg discovered at: {locator.FFmpegPath}");
 Console.WriteLine($"       Banner: {locator.VersionBanner}");
 Console.ResetColor();
-
-// Setup test directory
-var scratchDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "test_scratch");
-Directory.CreateDirectory(scratchDir);
-var srcWav = Path.Combine(scratchDir, "test_sample.wav");
 
 // Generate 1.5s sine tone via FFmpeg
 var genPsi = new ProcessStartInfo
@@ -38,8 +72,8 @@ using (var p = Process.Start(genPsi))
     p?.WaitForExit();
 }
 
-// 2. Audio Metadata & Duration
-Console.WriteLine("\n[2] Testing Fast Metadata & Duration Probing (TagLib)...");
+// 3. Audio Metadata & Duration
+Console.WriteLine("\n[3] Testing Fast Metadata & Duration Probing (TagLib)...");
 var metaService = new AudioMetadataService();
 var sw = Stopwatch.StartNew();
 var (duration, bitrate, sampleRate, channels) = metaService.ProbeAudio(srcWav);
@@ -55,20 +89,6 @@ if (Math.Abs(duration.TotalSeconds - 1.5) > 0.3)
 }
 Console.ForegroundColor = ConsoleColor.Green;
 Console.WriteLine($"[PASS] Accurate Duration probed: {duration.TotalSeconds:F2}s");
-Console.ResetColor();
-
-// 3. Safe Target Path Resolution
-Console.WriteLine("\n[3] Testing Safe Target Path Overwrite Protection...");
-var safePath = QueueManager.ResolveSafeTargetPath(srcWav, scratchDir, ".wav");
-if (Path.GetFileName(safePath) != "test_sample_converted.wav")
-{
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.WriteLine($"[FAIL] Expected 'test_sample_converted.wav', got: {Path.GetFileName(safePath)}");
-    Console.ResetColor();
-    return 1;
-}
-Console.ForegroundColor = ConsoleColor.Green;
-Console.WriteLine($"[PASS] Self-overwrite prevented: {Path.GetFileName(safePath)}");
 Console.ResetColor();
 
 // 4. Queue Duplicate Blocking

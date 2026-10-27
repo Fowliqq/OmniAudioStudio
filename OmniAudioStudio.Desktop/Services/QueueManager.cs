@@ -26,16 +26,39 @@ public class QueueManager
         _metadataService = metadataService;
     }
 
-    public static string ResolveSafeTargetPath(string sourcePath, string? outputDir, string targetExtension)
+    public static string ResolveSafeTargetPath(
+        string sourcePath,
+        string? outputDir,
+        string targetExtension,
+        IEnumerable<string>? reservedTargetPaths = null)
     {
         var srcDir = Path.GetDirectoryName(sourcePath) ?? "";
         var destDir = string.IsNullOrWhiteSpace(outputDir) ? srcDir : outputDir;
         var fileNameWithoutExt = Path.GetFileNameWithoutExtension(sourcePath);
-        var destPath = Path.Combine(destDir, $"{fileNameWithoutExt}{targetExtension}");
+        var extension = targetExtension.StartsWith('.') ? targetExtension : $".{targetExtension}";
+        var reservedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        if (string.Equals(Path.GetFullPath(destPath), Path.GetFullPath(sourcePath), StringComparison.OrdinalIgnoreCase))
+        if (reservedTargetPaths != null)
         {
-            destPath = Path.Combine(destDir, $"{fileNameWithoutExt}_converted{targetExtension}");
+            foreach (var path in reservedTargetPaths.Where(path => !string.IsNullOrWhiteSpace(path)))
+            {
+                reservedPaths.Add(Path.GetFullPath(path));
+            }
+        }
+
+        var destPath = Path.Combine(destDir, $"{fileNameWithoutExt}{extension}");
+        var sourceFullPath = Path.GetFullPath(sourcePath);
+        var isSourcePath = string.Equals(Path.GetFullPath(destPath), sourceFullPath, StringComparison.OrdinalIgnoreCase);
+
+        if (isSourcePath || File.Exists(destPath) || reservedPaths.Contains(Path.GetFullPath(destPath)))
+        {
+            destPath = Path.Combine(destDir, $"{fileNameWithoutExt}_converted{extension}");
+        }
+
+        var suffix = 2;
+        while (File.Exists(destPath) || reservedPaths.Contains(Path.GetFullPath(destPath)))
+        {
+            destPath = Path.Combine(destDir, $"{fileNameWithoutExt}_converted_{suffix++}{extension}");
         }
 
         return destPath;
@@ -51,6 +74,7 @@ public class QueueManager
         IProgress<string>? statusProgress = null)
     {
         var existingTasksMap = Tasks.ToDictionary(t => Path.GetFullPath(t.SourcePath), StringComparer.OrdinalIgnoreCase);
+        var existingTasksToReset = new List<ConversionTask>();
         var addedCount = 0;
         var filesToProcess = new List<string>();
 
@@ -68,15 +92,7 @@ public class QueueManager
                         {
                             if (existingTask != null && existingTask.Status != Models.TaskStatus.Converting && existingTask.Status != Models.TaskStatus.Pending)
                             {
-                                var profile = FormatRegistry.GetProfile(targetFormat);
-                                existingTask.TargetFormat = targetFormat;
-                                existingTask.TargetPath = ResolveSafeTargetPath(full, outputDir, profile.Extension);
-                                existingTask.Bitrate = bitrate;
-                                existingTask.SampleRate = sampleRate;
-                                existingTask.Channels = channels;
-                                existingTask.Status = Models.TaskStatus.Pending;
-                                existingTask.Progress = 0.0;
-                                existingTask.ErrorMessage = null;
+                                existingTasksToReset.Add(existingTask);
                             }
                         }
                         else
@@ -100,15 +116,7 @@ public class QueueManager
                             {
                                 if (existingTask != null && existingTask.Status != Models.TaskStatus.Converting && existingTask.Status != Models.TaskStatus.Pending)
                                 {
-                                    var profile = FormatRegistry.GetProfile(targetFormat);
-                                    existingTask.TargetFormat = targetFormat;
-                                    existingTask.TargetPath = ResolveSafeTargetPath(full, outputDir, profile.Extension);
-                                    existingTask.Bitrate = bitrate;
-                                    existingTask.SampleRate = sampleRate;
-                                    existingTask.Channels = channels;
-                                    existingTask.Status = Models.TaskStatus.Pending;
-                                    existingTask.Progress = 0.0;
-                                    existingTask.ErrorMessage = null;
+                                    existingTasksToReset.Add(existingTask);
                                 }
                             }
                             else
@@ -142,8 +150,6 @@ public class QueueManager
                 var fi = new FileInfo(file);
                 var (duration, _, _, _) = _metadataService.ProbeAudio(file);
                 var ext = fi.Extension;
-                var targetPath = ResolveSafeTargetPath(file, outputDir, profile.Extension);
-
                 var task = new ConversionTask
                 {
                     SourcePath = file,
@@ -152,7 +158,7 @@ public class QueueManager
                     Duration = duration,
                     SourceFormat = FormatRegistry.DetectSourceFormatName(ext),
                     TargetFormat = targetFormat,
-                    TargetPath = targetPath,
+                    TargetPath = string.Empty,
                     Bitrate = bitrate,
                     SampleRate = sampleRate,
                     Channels = channels
@@ -162,25 +168,34 @@ public class QueueManager
             return result;
         });
 
-        // 3. Add to UI collection safely
-        if (System.Windows.Application.Current?.Dispatcher != null && !System.Windows.Application.Current.Dispatcher.CheckAccess())
+        // 3. Update UI-bound tasks and add the new tasks on the UI thread.
+        void ApplyQueueChanges()
         {
-            System.Windows.Application.Current.Dispatcher.Invoke(() =>
+            var profile = FormatRegistry.GetProfile(targetFormat);
+            foreach (var existingTask in existingTasksToReset.Distinct())
             {
-                foreach (var task in tasksCreated)
-                {
-                    Tasks.Add(task);
-                    addedCount++;
-                }
-            });
-        }
-        else
-        {
+                ResetTask(existingTask, targetFormat, outputDir, bitrate, sampleRate, channels, profile.Extension);
+            }
+
             foreach (var task in tasksCreated)
             {
+                task.TargetPath = ResolveSafeTargetPath(
+                    task.SourcePath,
+                    outputDir,
+                    profile.Extension,
+                    Tasks.Select(existingTask => existingTask.TargetPath));
                 Tasks.Add(task);
                 addedCount++;
             }
+        }
+
+        if (System.Windows.Application.Current?.Dispatcher != null && !System.Windows.Application.Current.Dispatcher.CheckAccess())
+        {
+            System.Windows.Application.Current.Dispatcher.Invoke(ApplyQueueChanges);
+        }
+        else
+        {
+            ApplyQueueChanges();
         }
 
         LogMessage?.Invoke($"Added {addedCount} files to queue.");
@@ -211,18 +226,7 @@ public class QueueManager
         {
             if (task.Status != Models.TaskStatus.Converting)
             {
-                task.TargetFormat = targetFormat;
-                task.Bitrate = bitrate;
-                task.SampleRate = sampleRate;
-                task.Channels = channels;
-                task.TargetPath = ResolveSafeTargetPath(task.SourcePath, outputDir, profile.Extension);
-                if (task.Status == Models.TaskStatus.Completed)
-                {
-                    task.Status = Models.TaskStatus.Pending;
-                    task.Progress = 0.0;
-                    task.ErrorMessage = null;
-                    task.ActualFinalFileSize = null;
-                }
+                ResetTask(task, targetFormat, outputDir, bitrate, sampleRate, channels, profile.Extension);
             }
         }
         EmitProgress();
@@ -345,5 +349,29 @@ public class QueueManager
         }
 
         OverallProgressChanged?.Invoke(completed, total, overallPct);
+    }
+
+    private void ResetTask(
+        ConversionTask task,
+        string targetFormat,
+        string? outputDir,
+        string bitrate,
+        string sampleRate,
+        string channels,
+        string targetExtension)
+    {
+        task.TargetFormat = targetFormat;
+        task.Bitrate = bitrate;
+        task.SampleRate = sampleRate;
+        task.Channels = channels;
+        task.TargetPath = ResolveSafeTargetPath(
+            task.SourcePath,
+            outputDir,
+            targetExtension,
+            Tasks.Where(otherTask => otherTask != task).Select(otherTask => otherTask.TargetPath));
+        task.Status = Models.TaskStatus.Pending;
+        task.Progress = 0.0;
+        task.ErrorMessage = null;
+        task.ActualFinalFileSize = null;
     }
 }

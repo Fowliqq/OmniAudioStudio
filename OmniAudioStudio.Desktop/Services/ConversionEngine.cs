@@ -45,7 +45,7 @@ public class ConversionEngine
 
         var argsList = new List<string>
         {
-            "-y",
+            "-n",
             "-i", task.SourcePath,
             "-map_metadata", "0",
             "-vn",

@@ -49,7 +49,7 @@
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
                     <!-- Version Badge -->
                     <Border CornerRadius="8" Background="#14FFFFFF" BorderBrush="#20FFFFFF" BorderThickness="1" Padding="7,2" Margin="0,0,10,0">
-                        <TextBlock Text="v1.5.0 PRO" Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="11" FontWeight="SemiBold"/>
+                        <TextBlock Text="v1.5.1 PRO" Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="11" FontWeight="SemiBold"/>
                     </Border>
 
                     <!-- FFmpeg Detection Badge -->
